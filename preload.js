@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('pen', {
+  platform: process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux',
   play: (g, install) => ipcRenderer.invoke('play', { game: g, install }),
   cancelDl: () => ipcRenderer.invoke('dl:cancel'),
   setExe: (o) => ipcRenderer.invoke('exe:set', o),

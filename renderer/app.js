@@ -1,5 +1,6 @@
 'use strict';
 const TAGS = ['action','adventure','horror','puzzle','platformer','rpg','survival','shooter','strategy','multiplayer','racing','casual','pixel-art','2d','3d','retro','simulation','card-game','fighting','visual-novel','roguelike','cute','sci-fi','fantasy','difficult','funny','atmospheric','short','idle','tower-defense','farming','stealth','zombies','space','cyberpunk','rhythm','sandbox','arcade','point-and-click','minecraft'];
+const PF = pen.platform;
 const $ = (s) => document.querySelector(s);
 const st = { view: 'store', tag: '', q: '', page: 1, inst: {}, lib: [], dl: {}, cur: null, req: 0, loading: false, ended: false };
 const slug = (t) => t.toLowerCase().trim().replace(/\s+/g, '-');
@@ -249,8 +250,8 @@ async function detail(g) {
   const ups = $('#ups'); ups.innerHTML = '';
   if (r.uploads.length) {
     const h = document.createElement('div'); h.className = 'lbl'; h.style.padding = '10px 0 2px'; h.textContent = 'ไฟล์เกม'; ups.appendChild(h);
-    [...r.uploads].sort((a, b) => b.platforms.includes('win') - a.platforms.includes('win')).forEach((u) => {
-      const w = u.platforms.includes('win') || !u.platforms.length;
+    [...r.uploads].sort((a, b) => b.platforms.includes(PF) - a.platforms.includes(PF)).forEach((u) => {
+      const w = PF !== 'android' && (u.platforms.includes(PF) || !u.platforms.length);
       const d = document.createElement('div'); d.className = 'up' + (w ? '' : ' off');
       d.innerHTML = '<span class="pf"></span><span class="n"></span><span class="sz"></span>';
       d.querySelector('.pf').textContent = '[' + (u.platforms.map((p) => ({ win: 'WIN', mac: 'MAC', linux: 'LINUX', android: 'ANDROID' }[p])).join('/') || '?') + ']';
@@ -259,8 +260,10 @@ async function detail(g) {
         const i = document.createElement('button'); i.className = 'btn sm'; i.textContent = '⬇ ดาวน์โหลด'; i.onclick = () => run(u, false); d.appendChild(i);
         const t = document.createElement('button'); t.className = 'btn sm ghost'; t.textContent = '▶ เล่นเลย (ไม่เก็บไฟล์)'; t.onclick = () => run(u, true); d.appendChild(t);
       }
+      if (PF === 'android' && u.platforms.includes('android')) { const i = document.createElement('button'); i.className = 'btn sm'; i.textContent = '⬇ เปิดหน้าโหลด APK'; i.onclick = () => pen.ext(g.url); d.appendChild(i); }
       ups.appendChild(d);
     });
+    if (PF !== 'win' && !r.uploads.some((u) => u.platforms.includes(PF)) && !r.html5 && !ins) { const n = document.createElement('div'); n.className = 'dim'; n.style.padding = '6px 0'; n.textContent = PF === 'android' ? 'เล่นในแอปได้เฉพาะเกมเว็บ (HTML5) — เกมนี้ไม่ใช่เกมเว็บ' : 'เกมนี้ไม่มีไฟล์ Linux (มีเฉพาะ Windows/Mac)'; ups.appendChild(n); }
   } else if (!r.html5 && !ins) $('#dl').textContent = 'ไม่พบไฟล์ดาวน์โหลดฟรีบนหน้านี้ (อาจเป็นเกมที่ต้องซื้อ) — กด "เปิดหน้าเว็บ" เพื่อดูในเบราว์เซอร์';
   acts(r);
 }

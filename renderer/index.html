@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: http: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: http: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https:">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pen Store</title>
 <link rel="icon" href="logo.svg">
@@ -25,7 +25,7 @@
     <label class="lbl" for="sort">เรียงตาม</label>
     <select id="sort"><option value="">ยอดนิยม</option><option value="new-and-popular">มาใหม่</option><option value="top-rated">คะแนนสูง</option></select>
     <label class="lbl" for="flt">แสดง</label>
-    <select id="flt"><option value="">ทุกเกม</option><option value="free">เกมฟรี</option><option value="platform-windows">Windows</option><option value="html5">เล่นบนเว็บ (HTML5)</option></select>
+    <select id="flt"><option value="">ทุกเกม</option><option value="free">เกมฟรี</option><option value="platform-windows">Windows</option><option value="platform-linux">Linux</option><option value="platform-android">Android</option><option value="html5">เล่นบนเว็บ (HTML5)</option></select>
     <div class="lbl">หมวดหมู่</div>
     <div id="tags"></div>
   </aside>
@@ -49,6 +49,7 @@
 </div></div></div>
 
 <div id="toast"></div>
+<script src="platform.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

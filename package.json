@@ -4,14 +4,42 @@
   "description": "Pen Store - game launcher",
   "main": "main.js",
   "author": "ThePen",
-  "scripts": { "start": "electron .", "build": "electron-builder --win portable --x64" },
-  "dependencies": { "adm-zip": "^0.5.14", "7zip-bin": "^5.2.0" },
-  "devDependencies": { "electron": "^31.0.0", "electron-builder": "^24.13.3" },
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable --x64",
+    "build:linux": "electron-builder --linux AppImage --x64",
+    "build:win": "electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.14",
+    "7zip-bin": "^5.2.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
   "build": {
     "appId": "me.thepen.penstore",
     "productName": "Pen Store",
-    "files": ["main.js", "preload.js", "renderer/**/*"],
-    "asarUnpack": ["node_modules/7zip-bin/**"],
-    "win": { "icon": "build/icon.ico", "target": "portable", "artifactName": "PenStore.exe" }
-  }
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/7zip-bin/**"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "portable",
+      "artifactName": "PenStore.exe"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Game",
+      "artifactName": "PenStore.AppImage"
+    }
+  },
+  "homepage": "https://github.com/thepen/pen-store"
 }

@@ -4,11 +4,13 @@ const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const fs = require('fs');
 
+const PF = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
+if (PF === 'linux') app.commandLine.appendSwitch('no-sandbox'); // AppImage ส่วนใหญ่ไม่มี suid sandbox
 try { // เก็บเกม/save/ไลบรารีไว้ข้าง PenStore.exe ในโฟลเดอร์ PenStore-Data (ถ้าเขียนได้)
-  const pd = process.env.PORTABLE_EXECUTABLE_DIR;
+  const pd = process.env.PORTABLE_EXECUTABLE_DIR || (process.env.APPIMAGE && path.dirname(process.env.APPIMAGE));
   if (pd) { const d = path.join(pd, 'PenStore-Data'); fs.mkdirSync(d, { recursive: true }); fs.accessSync(d, fs.constants.W_OK); app.setPath('userData', d); }
 } catch {}
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
+const UA = (PF === 'win' ? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' : 'Mozilla/5.0 (X11; Linux x86_64)') + ' AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
 const libFile = () => path.join(app.getPath('userData'), 'library.json');
 const readLib = () => { try { return JSON.parse(fs.readFileSync(libFile(), 'utf8')); } catch { return []; } };
 const writeLib = (l) => fs.writeFileSync(libFile(), JSON.stringify(l, null, 1));
@@ -126,12 +128,16 @@ function hookCache(ses, id, getHost) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tempRoot = () => path.join(app.getPath('temp'), 'penstore-temp');
 const cleanTemp = () => { try { fs.rmSync(tempRoot(), { recursive: true, force: true }); } catch {} };
+const BAD = /unins|crash|redist|vcredist|dxsetup|dotnet|notification_helper|updater|vc_redist|chrome-sandbox|chrome_crashpad/i;
+function isElf(p) { try { const fd = fs.openSync(p, 'r'); const b = Buffer.alloc(4); fs.readSync(fd, b, 0, 4, 0); fs.closeSync(fd); return b[0] === 0x7f && b[1] === 0x45 && b[2] === 0x4c && b[3] === 0x46; } catch { return false; } }
+// เกมที่รันได้บนระบบนี้: Windows = .exe | Linux = ELF / .sh / .AppImage / .x86_64
+const isGameFile = (p) => PF === 'win' ? /\.exe$/i.test(p) : (/\.(sh|appimage|x86_64|x86|run)$/i.test(p) || (!/\.(so|dll|exe|bin|dat|pak|json|txt|png|jpg|ogg|wav|mp3|md)(\.\d+)*$/i.test(p) && isElf(p)));
 function findExes(root, depth = 0, out = []) {
   try {
     for (const e of fs.readdirSync(root, { withFileTypes: true })) {
       const p = path.join(root, e.name);
       if (e.isDirectory()) { if (depth < 4) findExes(p, depth + 1, out); }
-      else if (/\.exe$/i.test(e.name) && !/unins|crash|redist|vcredist|dxsetup|dotnet|notification_helper|updater|vc_redist/i.test(e.name)) out.push({ p, size: fs.statSync(p).size });
+      else if (isGameFile(p) && !BAD.test(e.name)) { if (PF !== 'win') try { fs.chmodSync(p, 0o755); } catch {} out.push({ p, size: fs.statSync(p).size }); }
     }
   } catch {}
   return out.sort((a, b) => b.size - a.size);
@@ -139,8 +145,10 @@ function findExes(root, depth = 0, out = []) {
 function launch(exe, tempDir) {
   const t = Date.now();
   try {
-    const c = spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore' });
-    c.on('error', () => shell.openPath(exe));
+    const env = { ...process.env }; for (const k of ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD', 'LD_LIBRARY_PATH', 'GDK_PIXBUF_MODULE_FILE']) delete env[k];
+    if (PF !== 'win') try { fs.chmodSync(exe, 0o755); } catch {}
+    const c = spawn(exe, [], { cwd: path.dirname(exe), detached: true, stdio: 'ignore', env });
+    c.on('error', () => PF === 'win' ? shell.openPath(exe) : shell.showItemInFolder(exe));
     c.on('exit', () => { if (tempDir && Date.now() - t > 15000) setTimeout(() => fs.rmSync(tempDir, { recursive: true, force: true }), 2000); });
     c.unref();
   } catch { shell.openPath(exe); }
@@ -219,7 +227,8 @@ ipcMain.handle('dl', async (e, { game: g, uploadId, temp }) => {
       if (!extractArchive(file, root)) { shell.openPath(dir); return { ok: true, manual: true, dir }; }
       fs.rmSync(file, { force: true });
     }
-    const exes = /\.exe$/i.test(file) ? [{ p: file }] : findExes(root);
+    if (PF !== 'win' && !/\.(zip|7z|tar|gz|tgz|bz2|xz)$/i.test(file)) try { fs.chmodSync(file, 0o755); } catch {}
+    const exes = (!/\.(zip|7z|tar|gz|tgz|bz2|xz)$/i.test(file) && isGameFile(file)) ? [{ p: file }] : findExes(root);
     if (!exes.length) { shell.openPath(root); return { ok: true, manual: true, dir: root }; }
     if (temp) { send({ phase: 'LAUNCHING' }); launch(exes[0].p, dir); return { ok: true, launched: true }; }
     fs.writeFileSync(path.join(gDir(g.id), 'game.json'), JSON.stringify({ game: g, kind: 'exe', dir: root, exe: exes[0].p, exes: exes.slice(0, 15).map((x) => x.p) }));
@@ -236,6 +245,7 @@ ipcMain.handle('exe:set', (_e, { id, rel }) => {
   m.exe = p; fs.writeFileSync(path.join(gDir(id), 'game.json'), JSON.stringify(m)); return true;
 });
 ipcMain.handle('folder:open', (_e, id) => { const m = metaOf(id); if (m) shell.openPath(m.dir || gDir(id)); return true; });
+ipcMain.handle('platform', () => PF);
 ipcMain.handle('data:path', () => app.getPath('userData'));
 app.on('quit', cleanTemp);
 
