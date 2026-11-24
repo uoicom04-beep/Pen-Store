@@ -17,13 +17,45 @@ const decode = (s = '') => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').repl
 // ---------- Pages ----------
 // main แค่ดึง HTML ด้วย network ของ Chromium แล้วส่งให้หน้าจอ parse เอง (ไม่ใช้หน้าต่างซ่อน จึงไม่แย่งโฟกัสคีย์บอร์ด)
 let mainWin = null;
-ipcMain.handle('page', async (_e, url) => {
+const sleep0 = (ms) => new Promise((r) => setTimeout(r, ms));
+// หน้าต่างซ่อนไว้ render หน้าเว็บที่ใช้ JS/Cloudflare (ใช้เป็นแผนสำรองเมื่อ fetch ธรรมดาไม่ได้ผลลัพธ์)
+async function renderPage(url) {
+  const win = new BrowserWindow({ show: false, focusable: false, width: 1200, height: 900, webPreferences: { sandbox: true, partition: 'scraper-view', backgroundThrottling: false } });
+  win.webContents.setUserAgent(UA);
   try {
+    await Promise.race([win.loadURL(url).catch(() => {}), sleep0(20000)]);
+    for (let i = 0; i < 40; i++) {
+      const n = await win.webContents.executeJavaScript(`document.querySelectorAll('.game_cell').length`).catch(() => 0);
+      if (n) break; await sleep0(500);
+    }
+    await win.webContents.executeJavaScript('window.scrollTo(0, document.body.scrollHeight)').catch(() => {});
+    await sleep0(700);
+    const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
+    return { ok: true, status: 200, url: win.webContents.getURL(), html };
+  } finally { if (!win.isDestroyed()) win.destroy(); }
+}
+ipcMain.handle('page', async (_e, url, render) => {
+  try {
+    if (render) return await renderPage(url);
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
-    const res = await net.fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }, signal: ctl.signal });
+    const res = await net.fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html,application/json,*/*' }, signal: ctl.signal });
     clearTimeout(t);
     return { ok: true, status: res.status, url: res.url, html: await res.text() };
   } catch (err) { return { ok: false, error: String(err.message || err) }; }
+});
+// โหลดรูปผ่าน main (กัน hotlink/referrer บล็อก) ใช้เป็นแผนสำรองตอนรูปโหลดตรงไม่ขึ้น
+const imgCache = new Map();
+ipcMain.handle('img', async (_e, u) => {
+  if (!/^https?:\/\//i.test(u || '')) return null;
+  if (imgCache.has(u)) return imgCache.get(u);
+  try {
+    const res = await net.fetch(u, { headers: { 'User-Agent': UA } });
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !/^image\//i.test(ct)) return null;
+    const d = `data:${ct};base64,${Buffer.from(await res.arrayBuffer()).toString('base64')}`;
+    if (imgCache.size > 300) imgCache.delete(imgCache.keys().next().value);
+    imgCache.set(u, d); return d;
+  } catch { return null; }
 });
 ipcMain.handle('open:ext', (_e, u) => shell.openExternal(u));
 
@@ -252,7 +284,7 @@ app.whenReady().then(() => {
   cleanTemp();
   const win = new BrowserWindow({
     width: 1200, height: 780, minWidth: 900, minHeight: 600, title: 'Pen Store',
-    backgroundColor: '#171a21', autoHideMenuBar: true, icon: path.join(__dirname, 'renderer/icon.png'),
+    backgroundColor: '#12141a', autoHideMenuBar: true, icon: path.join(__dirname, 'renderer/icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true }
   });
   mainWin = win;
