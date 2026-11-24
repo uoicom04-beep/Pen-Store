@@ -284,7 +284,7 @@ app.whenReady().then(() => {
   cleanTemp();
   const win = new BrowserWindow({
     width: 1200, height: 780, minWidth: 900, minHeight: 600, title: 'Pen Store',
-    backgroundColor: '#12141a', autoHideMenuBar: true, icon: path.join(__dirname, 'renderer/icon.png'),
+    backgroundColor: '#000000', autoHideMenuBar: true, icon: path.join(__dirname, 'renderer/icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true }
   });
   mainWin = win;
