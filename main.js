@@ -9,30 +9,43 @@ const writeLib = (l) => fs.writeFileSync(libFile(), JSON.stringify(l, null, 1));
 const decode = (s = '') => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 
 // ---------- Sources ----------
-// เพิ่มแหล่งเกมใหม่ได้ที่นี่: ทุก source ต้องคืน array ของ {id,title,author,desc,thumb,url,source}
+// เพิ่มแหล่งเกมใหม่: ทุก source คืน {games:[{id,title,author,desc,thumb,url,genre,source}], url}
+// ใช้หน้าต่างซ่อน (Chromium จริง) อ่านหน้า itch.io ผ่าน DOM แทน regex จะทนกว่าและรูป/ลิงก์ครบ
+let scraper = null, queue = Promise.resolve();
+const EXTRACT = `(() => [...document.querySelectorAll('.game_cell')].map(c => {
+  const a = c.querySelector('a.title.game_link, .game_title a, a.game_link'); if (!a) return null;
+  const img = c.querySelector('img'); let thumb = img && (img.dataset.lazy_src || (/^https?:/.test(img.src) ? img.src : ''));
+  if (!thumb) { const t = c.querySelector('.game_thumb'); const m = t && (t.getAttribute('style') || '').match(/url\\(["']?([^"')]+)/); thumb = m ? m[1] : ''; }
+  const id = c.dataset.game_id || a.href;
+  return { id: 'itch-' + id, title: a.textContent.trim(), url: a.href, thumb,
+    desc: (c.querySelector('.game_text') || {}).textContent || '', author: ((c.querySelector('.game_author a')||{}).textContent || ''),
+    genre: ((c.querySelector('.game_genre')||{}).textContent || ''), source: 'itch.io' };
+}).filter(Boolean))()`;
+function scrape(url) {
+  const job = async () => {
+    if (!scraper || scraper.isDestroyed()) scraper = new BrowserWindow({ show: false, webPreferences: { sandbox: true, partition: 'scraper' } });
+    scraper.webContents.setUserAgent(UA);
+    await scraper.loadURL(url);
+    for (let i = 0; i < 24; i++) {
+      const n = await scraper.webContents.executeJavaScript(`document.querySelectorAll('.game_cell').length`);
+      if (n) break; await new Promise((r) => setTimeout(r, 250));
+    }
+    return scraper.webContents.executeJavaScript(EXTRACT);
+  };
+  const p = queue.then(job, job); queue = p.catch(() => {}); return p;
+}
 const sources = {
   async itch({ q, tag, page = 1, sort = '' }) {
     let url;
     if (q) url = `https://itch.io/search?type=games&q=${encodeURIComponent(q)}&page=${page}`;
     else url = `https://itch.io/games/html5/free${sort ? '/' + sort : ''}${tag ? '/tag-' + encodeURIComponent(tag) : ''}?page=${page}`;
-    const res = await fetch(url, { headers: { 'User-Agent': UA } });
-    const html = await res.text();
-    const parts = html.split('data-game_id="').slice(1);
-    return parts.map((p) => {
-      const id = p.match(/^(\d+)/)?.[1];
-      const link = p.match(/class="title game_link"[^>]*href="([^"]+)"/) || p.match(/href="([^"]+)"[^>]*class="title game_link"/);
-      const title = p.match(/class="title game_link"[^>]*>([^<]+)</)?.[1];
-      const thumb = p.match(/data-lazy_src="([^"]+)"/)?.[1] || p.match(/<img[^>]+src="(https:[^"]+)"/)?.[1];
-      const desc = p.match(/class="game_text"[^>]*>([^<]*)</)?.[1] || '';
-      const author = p.match(/class="game_author"[^>]*><a[^>]*>([^<]+)</)?.[1] || '';
-      if (!id || !link || !title) return null;
-      return { id: 'itch-' + id, title: decode(title), author: decode(author), desc: decode(desc), thumb, url: link[1], source: 'itch.io' };
-    }).filter(Boolean);
+    const games = await scrape(url);
+    return { games, url };
   }
 };
 
 ipcMain.handle('search', async (_e, o) => {
-  try { return { ok: true, games: await sources[o.source || 'itch'](o) }; }
+  try { const r = await sources[o.source || 'itch'](o); return { ok: true, games: r.games, url: r.url }; }
   catch (err) { return { ok: false, error: String(err) }; }
 });
 
@@ -43,12 +56,18 @@ ipcMain.handle('lib:toggle', (_e, g) => {
   l = l.some((x) => x.id === g.id) ? l.filter((x) => x.id !== g.id) : [...l, g];
   writeLib(l); return l;
 });
-ipcMain.handle('lib:addurl', (_e, u) => {
-  const l = readLib();
-  const host = new URL(u).hostname;
-  const g = { id: 'url-' + Buffer.from(u).toString('base64').slice(0, 24), title: host + new URL(u).pathname, author: 'Custom URL', desc: u, thumb: '', url: u, source: 'URL' };
+ipcMain.handle('lib:addurl', async (_e, u) => {
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  const url = new URL(u); const l = readLib();
+  const g = { id: 'url-' + require('crypto').createHash('sha1').update(u).digest('hex').slice(0, 16), title: decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || url.hostname), author: url.hostname, desc: '', thumb: '', url: u, source: /itch\.io$/.test(url.hostname) ? 'itch.io' : 'URL' };
+  try {
+    const ctl = new AbortController(); setTimeout(() => ctl.abort(), 7000);
+    const html = await (await fetch(u, { headers: { 'User-Agent': UA }, signal: ctl.signal })).text();
+    const og = (k) => decode(html.match(new RegExp('property="og:' + k + '"[^>]*content="([^"]*)"'))?.[1] || '');
+    g.title = og('title') || decode(html.match(/<title>([^<]*)</)?.[1] || '') || g.title; g.thumb = og('image'); g.desc = og('description');
+  } catch {}
   if (!l.some((x) => x.id === g.id)) l.push(g);
-  writeLib(l); return l;
+  writeLib(l); return { lib: l, game: g };
 });
 ipcMain.handle('save:clear', async (_e, id) => {
   await session.fromPartition('persist:game-' + id).clearStorageData(); return true;
@@ -131,7 +150,7 @@ ipcMain.handle('play', async (_e, { game: g, install }) => {
   let host = meta?.playUrl ? new URL(meta.playUrl).hostname : null;
   if (meta) hookCache(ses, g.id, () => host);
 
-  const win = new BrowserWindow({ width: 1280, height: 800, autoHideMenuBar: true, title: g.title,
+  const win = new BrowserWindow({ width: 1280, height: 800, autoHideMenuBar: true, title: g.title, icon: path.join(__dirname, 'renderer/icon.png'),
     webPreferences: { session: ses, sandbox: true, contextIsolation: true } });
   win.webContents.setUserAgent(UA);
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
@@ -160,7 +179,7 @@ ipcMain.handle('play', async (_e, { game: g, install }) => {
 app.whenReady().then(() => {
   const win = new BrowserWindow({
     width: 1200, height: 780, minWidth: 900, minHeight: 600, title: 'Pen Store',
-    backgroundColor: '#171a21', autoHideMenuBar: true,
+    backgroundColor: '#171a21', autoHideMenuBar: true, icon: path.join(__dirname, 'renderer/icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true }
   });
   win.loadFile('renderer/index.html');

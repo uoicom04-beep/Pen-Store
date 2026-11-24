@@ -10,6 +10,6 @@
     "appId": "me.thepen.penstore",
     "productName": "Pen Store",
     "files": ["main.js", "preload.js", "renderer/**/*"],
-    "win": { "target": "portable", "artifactName": "PenStore.exe" }
+    "win": { "icon": "build/icon.ico", "target": "portable", "artifactName": "PenStore.exe" }
   }
 }
