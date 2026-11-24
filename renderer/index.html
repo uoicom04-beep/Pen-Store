@@ -1,0 +1,67 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8"><title>Pen Store</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Tahoma,sans-serif;background:#171a21;color:#c7d5e0;display:flex;height:100vh;overflow:hidden}
+aside{width:210px;background:#1b2838;padding:14px;overflow:auto;flex-shrink:0}
+aside h1{margin:0 0 14px;font-size:22px;color:#66c0f4}
+aside h3{font-size:11px;letter-spacing:1px;color:#8f98a0;margin:16px 0 6px}
+.nav{padding:7px 10px;border-radius:4px;cursor:pointer;font-size:14px}.nav:hover{background:#2a475e}.nav.on{background:#66c0f4;color:#0b1520;font-weight:600}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+header{display:flex;gap:8px;padding:12px;background:#1b2838;border-bottom:1px solid #000}
+input,select{background:#316282;border:0;color:#fff;padding:9px 12px;border-radius:4px;font-size:14px;outline:0}
+#q{flex:1}input::placeholder{color:#a9c3d6}
+button{background:#5c7e10;background:linear-gradient(#75b022,#588a1b);border:0;color:#fff;padding:9px 16px;border-radius:4px;cursor:pointer;font-size:14px}
+button.g{background:#2a475e}button:hover{filter:brightness(1.15)}
+#grid{flex:1;overflow:auto;padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;align-content:start}
+.card{background:#1b2838;border-radius:6px;overflow:hidden;cursor:pointer;transition:.15s}.card:hover{transform:translateY(-3px);background:#2a475e}
+.card img{width:100%;aspect-ratio:315/250;object-fit:cover;background:#0e141b;display:block}
+.card div{padding:8px 10px}.t{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.a{font-size:12px;color:#8f98a0}
+#more{grid-column:1/-1;justify-self:center}
+#msg{grid-column:1/-1;text-align:center;color:#8f98a0;padding:30px}
+#modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center}
+#box{background:#1b2838;width:880px;max-width:94vw;max-height:92vh;overflow:auto;border-radius:8px}
+#main{width:100%;height:380px;object-fit:contain;background:#000;display:block}.th{display:flex;gap:6px;padding:8px;background:#0e141b;overflow:auto}.th img{height:64px;cursor:pointer;opacity:.6;border:2px solid transparent}.th img.on,.th img:hover{opacity:1;border-color:#66c0f4}#box .in{padding:18px}.dsc{white-space:pre-wrap;max-height:220px;overflow:auto;margin:10px 0}.inf{font-size:13px;margin:8px 0}.inf b{color:#66c0f4;display:inline-block;min-width:110px}.badge{position:absolute;margin:6px;background:#5c7e10;color:#fff;font-size:11px;padding:2px 6px;border-radius:3px}
+#box h2{margin:0 0 4px}#box p{color:#acb2b8;font-size:14px;line-height:1.5}.row{display:flex;gap:8px;flex-wrap:wrap}
+</style></head><body>
+<aside><h1>🖋 Pen Store</h1>
+<div class="nav on" data-v="store">🛒 ร้านเกม</div><div class="nav" data-v="lib">📚 คลังของฉัน</div>
+<h3>เรียงตาม</h3><select id="sort" style="width:100%"><option value="">ยอดนิยม</option><option value="new-and-popular">มาใหม่</option><option value="top-rated">คะแนนสูง</option></select>
+<h3>แท็ก</h3><div id="tags"></div></aside>
+<main><header><input id="q" placeholder="ค้นหาเกม... (Enter)"><button id="go">ค้นหา</button><button class="g" id="url">+ เพิ่มจากลิงก์</button></header>
+<div id="grid"></div></main>
+<div id="modal"><div id="box"></div></div>
+<script>
+const TAGS=['action','adventure','horror','puzzle','platformer','rpg','survival','shooter','strategy','multiplayer','racing','casual','pixel-art','2d','3d','retro','simulation','card-game','fighting','visual-novel'];
+let st={view:'store',tag:'',q:'',page:1,lib:[],inst:{}};const $=s=>document.querySelector(s);
+const tagsEl=$('#tags');tagsEl.innerHTML='<div class="nav on" data-t="">ทั้งหมด</div>'+TAGS.map(t=>`<div class="nav" data-t="${t}">${t}</div>`).join('');
+tagsEl.onclick=e=>{const t=e.target.dataset.t;if(t===undefined)return;tagsEl.querySelectorAll('.nav').forEach(n=>n.classList.toggle('on',n===e.target));st.tag=t;st.q='';$('#q').value='';setView('store');load(true)};
+document.querySelectorAll('aside>.nav').forEach(n=>n.onclick=()=>{document.querySelectorAll('aside>.nav').forEach(x=>x.classList.toggle('on',x===n));setView(n.dataset.v)});
+function setView(v){st.view=v;v==='lib'?showLib():load(true)}
+async function showLib(){st.inst=await pen.inst();st.lib=await pen.lib();render(st.lib.filter(g=>!st.q||g.title.toLowerCase().includes(st.q.toLowerCase())),true)}
+function render(games,replace){const g=$('#grid');if(replace)g.innerHTML='';$('#more')?.remove();$('#msg')?.remove();
+ if(!games.length&&replace)g.insertAdjacentHTML('beforeend','<div id="msg">ไม่พบเกม</div>');
+ games.forEach(x=>{const d=document.createElement('div');d.className='card';d.innerHTML=(st.inst[x.id]?'<span class="badge">ติดตั้งแล้ว</span>':'')+`<img loading="lazy" src="${x.thumb||''}"><div><div class="t"></div><div class="a"></div></div>`;
+  d.querySelector('.t').textContent=x.title;d.querySelector('.a').textContent=x.author+' · '+x.source;d.onclick=()=>detail(x);g.appendChild(d)});
+ if(st.view==='store'&&games.length){const b=document.createElement('button');b.id='more';b.textContent='โหลดเพิ่ม';b.onclick=()=>load(false);g.appendChild(b)}}
+async function load(reset){st.inst=await pen.inst();if(reset)st.page=1;else st.page++;if(reset)$('#grid').innerHTML='<div id="msg">กำลังโหลด...</div>';
+ const r=await pen.search({q:st.q,tag:st.tag,page:st.page,sort:$('#sort').value});
+ if(!r.ok){$('#grid').innerHTML='<div id="msg">โหลดไม่ได้: '+r.error+'</div>';return}render(r.games,reset)}
+async function detail(g){st.lib=await pen.lib();st.inst=await pen.inst();const has=st.lib.some(x=>x.id===g.id),ins=st.inst[g.id];const b=$('#box');
+ b.innerHTML=`<img id="main" src="${g.thumb||''}"><div class="th" id="th"></div><div class="in"><h2></h2><div class="a"></div><div class="dsc" id="dsc">กำลังโหลดรายละเอียด...</div><div class="inf" id="inf"></div><div class="row"><button id="p"></button><button class="g" id="t">▶ เล่นชั่วคราว</button><button class="g" id="f"></button><button class="g" id="s">ล้าง save</button><button class="g" id="u">🗑 ถอนการติดตั้ง</button><button class="g" id="c">ปิด</button></div></div>`;
+ b.querySelector('h2').textContent=g.title;b.querySelector('.a').textContent=g.author+' · '+g.source;$('#dsc').textContent=g.desc||'';
+ $('#p').textContent=ins?`▶ เล่น (ติดตั้งแล้ว ${(ins.size/1048576).toFixed(1)} MB)`:'⬇ ติดตั้ง & เล่น';$('#t').style.display=ins?'none':'';$('#u').style.display=ins?'':'none';
+ $('#f').textContent=has?'★ เอาออกจากคลัง':'☆ เพิ่มเข้าคลัง';
+ $('#p').onclick=async()=>{await pen.play(g,true);if(!has)await pen.libToggle(g)};$('#t').onclick=()=>pen.play(g,false);
+ $('#f').onclick=async()=>{await pen.libToggle(g);$('#modal').style.display='none';if(st.view==='lib')showLib()};
+ $('#u').onclick=async()=>{if(confirm('ลบไฟล์เกมออกจากเครื่อง? (save ยังอยู่)')){await pen.uninstall(g.id);$('#modal').style.display='none';st.view==='lib'?showLib():load(true)}};
+ $('#s').onclick=async()=>{if(confirm('ลบ save ของเกมนี้?'))await pen.clearSave(g.id)};$('#c').onclick=()=>$('#modal').style.display='none';$('#modal').style.display='flex';
+ const r=await pen.details(g.url);if(!r.ok)return $('#dsc').textContent=g.desc||'โหลดรายละเอียดไม่ได้';
+ $('#dsc').textContent=r.desc||g.desc||'(ไม่มีคำอธิบาย)';
+ $('#inf').innerHTML=r.info.map(i=>`<div><b></b><span></span></div>`).join('');$('#inf').querySelectorAll('div').forEach((d,k)=>{d.firstChild.textContent=r.info[k][0];d.lastChild.textContent=r.info[k][1]});
+ if(r.shots.length){$('#main').src=r.shots[0];$('#th').innerHTML=r.shots.map((s,k)=>`<img src="${s}" class="${k?'':'on'}">`).join('');
+  $('#th').onclick=e=>{if(e.target.tagName!=='IMG')return;$('#main').src=e.target.src;$('#th').querySelectorAll('img').forEach(i=>i.classList.toggle('on',i===e.target))}}else $('#th').style.display='none'}
+$('#modal').onclick=e=>{if(e.target.id==='modal')e.target.style.display='none'};
+const search=()=>{st.q=$('#q').value.trim();if(st.view==='lib')showLib();else load(true)};
+$('#go').onclick=search;$('#q').onkeydown=e=>e.key==='Enter'&&search();$('#sort').onchange=()=>st.view==='store'&&load(true);
+$('#url').onclick=async()=>{const u=prompt('วางลิงก์เกมเว็บ (itch.io หรือเว็บอื่นที่เล่นในเบราว์เซอร์ได้)');if(!u)return;try{new URL(u)}catch{return alert('ลิงก์ไม่ถูกต้อง')}await pen.addUrl(u);alert('เพิ่มเข้าคลังแล้ว');};
+load(true);
+</script></body></html>
