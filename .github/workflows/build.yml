@@ -43,7 +43,8 @@ jobs:
         with: { node-version: 20 }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - uses: android-actions/setup-android@v3
+      - name: Accept Android licenses (SDK ติดมากับ runner อยู่แล้ว)
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - run: ./scripts/android-setup.sh
       - uses: actions/upload-artifact@v4
         with: { name: PenStore-apk, path: PenStore.apk }
