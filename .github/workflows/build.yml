@@ -1,9 +1,17 @@
 name: Build Pen Store
 on:
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'เลขเวอร์ชันที่จะปล่อย เช่น v1.0.0'
+        required: true
+        default: 'v1.0.0'
+      release:
+        description: 'ปล่อยเป็น Release (ติ๊ก = ปล่อย / ไม่ติ๊ก = แค่ build)'
+        type: boolean
+        default: true
 permissions:
   contents: write
 jobs:
@@ -18,8 +26,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: PenStore-exe, path: dist/PenStore.exe }
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: Pen Store ${{ inputs.version || github.ref_name }}
           files: dist/PenStore.exe
           generate_release_notes: true
