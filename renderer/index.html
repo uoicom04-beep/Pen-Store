@@ -47,6 +47,7 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
 .dlg{width:520px}.dlg .in input{width:100%;background:#000;border:1px solid var(--line);color:var(--g);padding:10px;font:inherit;outline:0;margin:10px 0}.dlg .in input:focus{border-color:var(--g)}
   .up{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--line);margin:4px 0;background:#070d10}.up .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.up .pf{color:var(--m);font-size:11px;min-width:70px}.up .sz{color:var(--dim);font-size:11px}.up.dim{opacity:.5}.up .btn{padding:5px 10px;font-size:11px}
 #dl{color:var(--g);margin:8px 0;min-height:16px;white-space:pre-wrap}
+  .pg{height:14px;background:#03070a;border:1px solid var(--line);margin:6px 0}.pg i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--g),var(--c));box-shadow:0 0 10px var(--g);transition:width .2s}.cpg{height:8px;margin-top:8px}
 #boot{position:fixed;inset:0;z-index:100;background:#000;color:var(--g);padding:40px;font-size:14px;line-height:1.9;transition:opacity .5s;white-space:pre}
 </style></head><body>
 <canvas id="rain"></canvas>
@@ -66,13 +67,13 @@ main{flex:1;display:flex;flex-direction:column;min-width:0}
  <div class="bar"><span class="pr">root@<i>penstore</i>:~$</span><input id="q" placeholder="ค้นหาเกม... หรือพิมพ์ #horror เพื่อกรองแท็ก (Enter)"><button class="btn" id="go">SEARCH</button><button class="btn g" id="url">+ LINK</button></div>
  <div id="grid"></div>
 </main></div>
-<div class="sb"><span>SRC: <b>itch.io</b></span><span>LOADED: <b id="sn">0</b></span><span>INSTALLED: <b id="si">0</b></span><span class="sp"></span><span id="ss">READY</span></div>
+<div class="sb"><span>SRC: <b>itch.io</b></span><span>LOADED: <b id="sn">0</b></span><span>INSTALLED: <b id="si">0</b></span><span>DATA: <b id="sp" style="font-weight:400"></b></span><span class="sp"></span><span id="ss">READY</span></div>
 <div class="ov" id="modal"><div class="box" id="box"></div></div>
 <div class="ov" id="dlg"><div class="box dlg"><div class="in"><h2 id="dt"></h2><input id="di"><div class="row"><button class="btn" id="dok">OK</button><button class="btn g" id="dno">ยกเลิก</button></div></div></div></div>
 <script>
 const TAGS=['action','adventure','horror','puzzle','platformer','rpg','survival','shooter','strategy','multiplayer','racing','casual','pixel-art','2d','3d','retro','simulation','card-game','fighting','visual-novel','roguelike','cute','sci-fi','fantasy','difficult','funny','atmospheric','short','idle','tower-defense','farming','stealth','zombies','space','cyberpunk','rhythm','sandbox','arcade','point-and-click','minecraft'];
 const $=s=>document.querySelector(s);
-let st={view:'store',tag:'',q:'',page:1,inst:{},lib:[],busy:false};
+let st={view:'store',tag:'',q:'',page:1,inst:{},lib:[],busy:false,dl:{},cur:null};
 const slug=t=>t.toLowerCase().trim().replace(/\s+/g,'-');
 // boot
 (async()=>{const L=['[ OK ] INIT PEN-STORE CORE','[ OK ] LOADING GAME INDEX','[ OK ] MOUNTING SAVE VAULT','[ OK ] CONNECTING itch.io','> ACCESS GRANTED_'];const b=$('#boot');for(const l of L){b.textContent+=l+'\n';await new Promise(r=>setTimeout(r,140))}b.style.opacity=0;setTimeout(()=>b.remove(),500)})();
@@ -89,7 +90,7 @@ function setNav(v){st.view=v;document.querySelectorAll('aside>.nav').forEach(x=>
 document.querySelectorAll('aside>.nav').forEach(n=>n.onclick=()=>{setNav(n.dataset.v);n.dataset.v==='lib'?lib():store(true)});
 function status(t){$('#ss').textContent=t}
 function msg(html){$('#grid').innerHTML='<div class="msg">'+html+'</div>'}
-function card(x){const d=document.createElement('div');d.className='card';
+function card(x){const d=document.createElement('div');d.className='card';d.dataset.id=x.id;
  d.innerHTML='<div class="im"><span></span></div><div class="bd"><div class="t"></div><div class="a"></div></div>';
  d.querySelector('span').textContent=(x.title||'?')[0].toUpperCase();
  if(x.thumb){const i=new Image();i.referrerPolicy='no-referrer';i.onload=()=>d.querySelector('.im').prepend(i);i.src=x.thumb}
@@ -103,40 +104,81 @@ function render(games,replace){const g=$('#grid');if(replace){g.innerHTML='';sho
  games.forEach(x=>g.appendChild(card(x)));shown+=games.length;$('#sn').textContent=shown;
  if(st.view==='store'&&games.length){const b=document.createElement('button');b.id='more';b.className='btn';b.textContent='LOAD MORE โหลดเพิ่ม';b.onclick=()=>store(false);g.appendChild(b)}}
 async function refreshInst(){st.inst=await pen.inst();$('#si').textContent=Object.keys(st.inst).length}
+const abs=(h,base)=>{try{return new URL(h,base).href}catch{return ''}};
+async function getDoc(url){const r=await pen.page(url);if(!r.ok)throw new Error(r.error);const doc=new DOMParser().parseFromString(r.html,'text/html');return {doc,url:r.url,status:r.status,len:r.html.length}}
+function parseGames(doc,base){const seen=new Set();return [...doc.querySelectorAll('.game_cell')].map(c=>{
+ const a=c.querySelector('a.title.game_link, .game_title a, a.game_link');if(!a)return null;
+ const img=c.querySelector('img');let thumb=img?(img.getAttribute('data-lazy_src')||img.getAttribute('src')||''):'';
+ if(!thumb||thumb.startsWith('data:')){const t=c.querySelector('.game_thumb');const m=t&&(t.getAttribute('style')||'').match(/url\(["']?([^"')]+)/);thumb=m?m[1]:''}
+ const tx=s=>(c.querySelector(s)?.textContent||'').trim();const url=abs(a.getAttribute('href'),base);
+ const id='itch-'+(c.getAttribute('data-game_id')||url);if(seen.has(id))return null;seen.add(id);
+ return {id,title:a.textContent.trim(),url,thumb:thumb?abs(thumb,base):'',desc:tx('.game_text'),author:tx('.game_author a'),genre:tx('.game_genre'),price:tx('.price_value'),source:'itch.io'}}).filter(Boolean)}
+function listUrl(){const {q,tag,page}=st;if(q)return `https://itch.io/search?q=${encodeURIComponent(q)}&page=${page}`;
+ const parts=[$('#sort').value,$('#flt').value,tag?'tag-'+encodeURIComponent(tag):''].filter(Boolean);return `https://itch.io/games${parts.length?'/'+parts.join('/'):''}?page=${page}`}
 async function store(reset){if(st.busy)return;st.busy=true;await refreshInst();if(reset)st.page=1;else st.page++;
  if(reset)msg('<b>LOADING...</b><br>กำลังดึงรายชื่อเกมจาก itch.io');status('FETCHING...');
- const r=await pen.search({q:st.q,tag:st.tag,page:st.page,sort:$('#sort').value,filter:$('#flt').value});st.busy=false;
- if(!r.ok){status('ERROR');return msg('<b>ERROR</b><br>'+r.error+'<br><br><button class="btn" onclick="store(true)">RETRY</button>')}
- if(!r.games.length&&reset){status('NO RESULT');return msg('<b>ไม่พบเกม</b><br>ลองคำค้น/แท็กอื่น หรือเช็คอินเทอร์เน็ต<br><code>'+r.url+'</code><br><br><button class="btn" onclick="store(true)">RETRY</button>')}
- if(!r.games.length){status('END');$('#more')?.remove();return}
- render(r.games,reset);status('READY')}
+ const url=listUrl();let games=[],info='';
+ try{const d=await getDoc(url);games=parseGames(d.doc,d.url);info=`HTTP ${d.status} · ${d.len} bytes · title: ${d.doc.title}`}
+ catch(e){st.busy=false;status('ERROR');return msg('<b>ERROR</b><br>'+e.message+'<br><code>'+url+'</code><br><br><button class="btn" onclick="store(true)">RETRY</button>')}
+ st.busy=false;
+ if(!games.length&&reset){status('NO RESULT');return msg('<b>ไม่พบเกม</b><br>ลองคำค้น/แท็กอื่น<br><code>'+url+'</code><br><code>'+info+'</code><br><br><button class="btn" onclick="store(true)">RETRY</button>')}
+ if(!games.length){status('END');$('#more')?.remove();return}
+ render(games,reset);status('READY')}
+function parseDetail(doc,base){
+ let shots=[...doc.querySelectorAll('a[data-image_lightbox]')].map(a=>abs(a.getAttribute('href'),base)).filter(Boolean);
+ if(!shots.length){const og=doc.querySelector('meta[property="og:image"]');if(og)shots=[og.content]}
+ let desc='';const d=doc.querySelector('.formatted_description');
+ if(d){const c=d.cloneNode(true);c.querySelectorAll('br').forEach(b=>b.replaceWith('\n'));c.querySelectorAll('p,li,h1,h2,h3,h4,div').forEach(e=>e.append('\n'));desc=c.textContent.replace(/\n{3,}/g,'\n\n').trim().slice(0,5000)}
+ if(!desc)desc=doc.querySelector('meta[property="og:description"]')?.content||'';
+ const info=[...doc.querySelectorAll('.game_info_panel_widget tr')].map(r=>{const t=r.querySelectorAll('td');if(t.length<2)return null;
+  const links=[...t[1].querySelectorAll('a')].map(a=>a.textContent.trim()).filter(Boolean);
+  return [t[0].textContent.trim(),links.length?links.join(', '):t[1].textContent.trim().replace(/\s+/g,' ')]}).filter(Boolean);
+ const uploads=[...doc.querySelectorAll('.upload')].map(u=>{const b=u.querySelector('.download_btn');if(!b)return null;
+  const has=s=>!!u.querySelector('[class*="'+s+'"]');const pl=[];if(has('icon-windows'))pl.push('win');if(has('icon-apple'))pl.push('mac');if(has('icon-tux'))pl.push('linux');if(has('icon-android'))pl.push('android');
+  const n=u.querySelector('.upload_name .name, .upload_name');const s=u.querySelector('.file_size');
+  return {id:b.getAttribute('data-upload_id'),name:n?(n.getAttribute('title')||n.textContent).trim():'file',size:s?s.textContent.trim():'',platforms:pl}}).filter(Boolean);
+ const html5=!!doc.querySelector('.load_iframe_btn, .html_embed_widget, .iframe_placeholder');
+ return {shots,desc,info,uploads,html5}}
+async function loadDetail(url){try{const d=await getDoc(url);return {ok:true,...parseDetail(d.doc,d.url)}}catch(e){return {ok:false,error:String(e)}}}
 async function lib(){await refreshInst();st.lib=await pen.lib();const q=st.q.toLowerCase();
  const l=st.lib.filter(g=>!q||g.title.toLowerCase().includes(q));
  if(!l.length)return msg('<b>LIBRARY ว่าง</b><br>กดเกมแล้วเพิ่มเข้าคลัง หรือกด + LINK เพื่อใส่ลิงก์เกม');render(l,true);status('LIBRARY')}
 const ask=(title,ph)=>new Promise(res=>{$('#dt').textContent=title;const i=$('#di');i.value='';i.placeholder=ph;$('#dlg').style.display='flex';i.focus();
  const done=v=>{$('#dlg').style.display='none';res(v)};$('#dok').onclick=()=>done(i.value.trim());$('#dno').onclick=()=>done(null);i.onkeydown=e=>{if(e.key==='Enter')done(i.value.trim());if(e.key==='Escape')done(null)}});
-pen.onProgress(t=>{const d=$('#dl');if(d)d.textContent=t;status(t)});
+function paintDl(o){const s=st.dl[o.id]=Object.assign(st.dl[o.id]||{},o);const pct=s.pct!=null?s.pct:null;
+ const txt=s.phase==='DOWNLOADING'?`DOWNLOADING ${pct!=null?pct+'%':''} (${(s.received/1048576).toFixed(1)}${s.total>0?' / '+(s.total/1048576).toFixed(1):''} MB)`:(s.text||s.phase||'');
+ status(txt);
+ if(st.cur===o.id){const d=$('#dl');if(d){d.innerHTML='<div></div><div class="pg"><i></i></div>';d.firstChild.textContent=txt;d.querySelector('i').style.width=(pct!=null?pct:(s.phase==='EXTRACTING'?100:6))+'%'}}
+ const c=document.querySelector(`.card[data-id="${CSS.escape(o.id)}"]`);if(c){let p=c.querySelector('.cpg');if(!p){p=document.createElement('div');p.className='pg cpg';p.innerHTML='<i></i>';c.querySelector('.bd').appendChild(p)}p.firstChild.style.width=(pct!=null?pct:30)+'%'}}
+pen.onProgress(o=>paintDl(o));
 async function detail(g){await refreshInst();st.lib=await pen.lib();const has=st.lib.some(x=>x.id===g.id),ins=st.inst[g.id],b=$('#box');
  b.innerHTML='<img id="main"><div class="th" id="th"></div><div class="in"><h2></h2><div class="a"></div><div class="dsc" id="dsc">LOADING...</div><div class="inf" id="inf"></div><div id="ups"></div><div id="dl"></div><div class="row" id="acts"></div></div>';
  const mi=$('#main');if(g.thumb)mi.src=g.thumb;else mi.style.display='none';
  b.querySelector('h2').textContent=g.title;b.querySelector('.a').textContent=(g.author||'')+' · '+g.source;$('#dsc').textContent=g.desc||'';
  const btn=(txt,cls,fn)=>{const x=document.createElement('button');x.className='btn '+cls;x.textContent=txt;x.onclick=fn;$('#acts').appendChild(x);return x};
- const close=()=>$('#modal').style.display='none';
- const acts=(r)=>{$('#acts').innerHTML='';
-  if(ins)btn(`▶ PLAY (INSTALLED ${(ins.size/1048576).toFixed(1)} MB)`,'',()=>pen.play(g,true));
+ const close=()=>{st.cur=null;$('#modal').style.display='none'};
+ let R=null;
+ const acts=(r)=>{$('#acts').innerHTML='';const busy=st.dl[g.id]&&!st.dl[g.id].done;
+  if(busy){btn('✖ CANCEL ยกเลิกการโหลด','r',()=>pen.cancelDl());btn('CLOSE (โหลดต่อเบื้องหลัง)','g',close);return}
+  if(ins){btn(`▶ PLAY (INSTALLED ${(ins.size/1048576).toFixed(1)} MB)`,'',()=>pen.play(g,true));
+   if(ins.kind==='exe'){btn('📁 OPEN FOLDER','g',()=>pen.openFolder(g.id));
+    if((ins.exes||[]).length>1){const s=document.createElement('select');s.style.cssText='width:auto;margin:0;max-width:340px';ins.exes.forEach(x=>{const o=document.createElement('option');o.value=x;o.textContent=x;if(x===ins.exe)o.selected=true;s.appendChild(o)});s.onchange=()=>pen.setExe({id:g.id,rel:s.value});$('#acts').appendChild(s)}}}
   else if(r&&r.html5){btn('⬇ INSTALL & PLAY (WEB)','',async()=>{await pen.play(g,true);if(!has)await pen.libToggle(g)});btn('▶ PLAY TEMP เล่นชั่วคราว','g',()=>pen.play(g,false))}
   btn(has?'★ REMOVE FROM LIBRARY':'☆ ADD TO LIBRARY','g',async()=>{await pen.libToggle(g);close();if(st.view==='lib')lib()});
   btn('OPEN PAGE','g',()=>pen.ext(g.url));
-  if(ins||(r&&r.html5))btn('CLEAR SAVE','g',async()=>{if(confirm('ลบ save ของเกมนี้? (เฉพาะ save ของเกมเว็บในแอป)'))await pen.clearSave(g.id)});
+  if(ins&&ins.kind!=='exe'||(!ins&&r&&r.html5))btn('CLEAR SAVE','g',async()=>{if(confirm('ลบ save ของเกมนี้? (เฉพาะ save ของเกมเว็บในแอป)'))await pen.clearSave(g.id)});
   if(ins)btn('UNINSTALL','r',async()=>{if(confirm('ลบไฟล์เกมออกจากเครื่อง?')){await pen.uninstall(g.id);close();st.view==='lib'?lib():store(true)}});
   btn('CLOSE','g',close)};
- acts(null);$('#modal').style.display='flex';
- const run=async(u,temp)=>{document.querySelectorAll('#ups .btn,#acts .btn').forEach(x=>x.disabled=true);$('#dl').textContent='STARTING...';
-  const r=await pen.dl({game:g,uploadId:u.id,temp});
-  if(!r.ok){$('#dl').textContent='ERROR: '+r.error;document.querySelectorAll('#ups .btn,#acts .btn').forEach(x=>x.disabled=false);return}
-  if(r.manual){$('#dl').textContent='โหลดแล้ว แต่ไฟล์ไม่ใช่ zip/exe (เช่น 7z/rar) — เปิดโฟลเดอร์ให้แล้ว แตกไฟล์เองได้เลย';document.querySelectorAll('#ups .btn,#acts .btn').forEach(x=>x.disabled=false);return}
-  if(!temp){if(!has)await pen.libToggle(g);await refreshInst();detail(g)}else{$('#dl').textContent='LAUNCHED ✓ (ไฟล์ชั่วคราวจะถูกลบเมื่อปิดเกม/ปิดแอป)';document.querySelectorAll('#ups .btn,#acts .btn').forEach(x=>x.disabled=false)}};
- const r=await pen.details(g.url);if(!r.ok){$('#dsc').textContent=g.desc||'โหลดรายละเอียดไม่ได้';return acts(null)}
+ acts(null);st.cur=g.id;$('#modal').style.display='flex';if(st.dl[g.id]&&!st.dl[g.id].done)paintDl(st.dl[g.id]);
+ const run=async(u,temp)=>{if(Object.values(st.dl).some(x=>!x.done))return alert('กำลังโหลดเกมอื่นอยู่ รอให้เสร็จก่อน');
+  st.dl[g.id]={id:g.id,phase:'STARTING...',pct:null};acts(R);$('#ups').style.cssText='opacity:.35;pointer-events:none';paintDl({id:g.id,phase:'STARTING...'});
+  const res=await pen.dl({game:g,uploadId:u.id,temp});st.dl[g.id].done=true;document.querySelector(`.card[data-id="${CSS.escape(g.id)}"] .cpg`)?.remove();$('#ups').style.cssText='';
+  if(!res.ok){delete st.dl[g.id];status('ERROR');$('#dl').textContent='ERROR: '+res.error;return acts(R)}
+  delete st.dl[g.id];
+  if(res.manual){$('#dl').textContent='โหลดแล้ว แต่แตกไฟล์/หา exe อัตโนมัติไม่ได้ — เปิดโฟลเดอร์ให้แล้ว';return acts(R)}
+  if(res.installed){if(!has)await pen.libToggle(g);await refreshInst();status('INSTALLED ✓ '+g.title);if(st.cur===g.id)detail(g);return}
+  $('#dl').textContent='LAUNCHED ✓ (ไฟล์ชั่วคราวจะถูกลบเมื่อปิดเกม/ปิดแอป)';status('LAUNCHED');acts(R)};
+ const r=await loadDetail(g.url);if(st.cur!==g.id)return;R=r.ok?r:null;if(!r.ok){$('#dsc').textContent=g.desc||'โหลดรายละเอียดไม่ได้';return acts(null)}
  $('#dsc').textContent=r.desc||g.desc||'(ไม่มีคำอธิบาย)';
  const inf=$('#inf');inf.innerHTML='';r.info.forEach(([k,v])=>{const d=document.createElement('div'),bb=document.createElement('b');bb.textContent=k;d.appendChild(bb);
   if(/tag|genre/i.test(k)){v.split(/,\s*/).filter(Boolean).forEach(t=>{const c=document.createElement('span');c.className='chip';c.textContent='#'+t;c.onclick=()=>{close();setTag(slug(t))};d.appendChild(c)})}
@@ -149,17 +191,18 @@ async function detail(g){await refreshInst();st.lib=await pen.lib();const has=st
    const d=document.createElement('div');d.className='up'+(w?'':' dim');
    d.innerHTML='<span class="pf"></span><span class="n"></span><span class="sz"></span>';
    d.querySelector('.pf').textContent='['+(u.platforms.map(p=>({win:'WIN',mac:'MAC',linux:'LINUX',android:'ANDROID'}[p])).join('/')||'?')+']';d.querySelector('.n').textContent=u.name;d.querySelector('.sz').textContent=u.size;
-   if(w){const i=document.createElement('button');i.className='btn';i.textContent='⬇ INSTALL';i.onclick=()=>run(u,false);d.appendChild(i);const t=document.createElement('button');t.className='btn g';t.textContent='▶ TEMP';t.onclick=()=>run(u,true);d.appendChild(t)}
+   if(w){const i=document.createElement('button');i.className='btn';i.textContent='⬇ DOWNLOAD';i.onclick=()=>run(u,false);d.appendChild(i);const t=document.createElement('button');t.className='btn g';t.textContent='▶ TEMP (ไม่เก็บไฟล์)';t.onclick=()=>run(u,true);d.appendChild(t)}
    ups.appendChild(d)})}
  else if(!r.html5&&!ins){$('#dl').textContent='ไม่พบไฟล์ดาวน์โหลดฟรีบนหน้านี้ (อาจเป็นเกมที่ต้องซื้อ/มีหน้าดาวน์โหลดแยก) — กด OPEN PAGE เพื่อเปิดหน้าเกม'}
  acts(r)}
 $('#modal').onclick=e=>{if(e.target.id==='modal')e.target.style.display='none'};
 function search(){let q=$('#q').value.trim();if(q.startsWith('#')){st.tag=slug(q.slice(1));st.q='';markTag()}else{st.q=q;st.tag='';markTag()}
  if(st.view==='lib')lib();else store(true)}
-$('#q').addEventListener('mousedown',()=>pen.focus());$('#q').addEventListener('focus',()=>pen.focus());window.addEventListener('focus',()=>$('#q')===document.activeElement||0);
 $('#go').onclick=search;$('#q').onkeydown=e=>e.key==='Enter'&&search();$('#sort').onchange=$('#flt').onchange=()=>st.view==='store'&&store(true);
 $('#url').onclick=async()=>{const u=await ask('> ADD GAME LINK','วางลิงก์เกม เช่น https://xxx.itch.io/เกม');if(!u)return;
  try{new URL(/^https?:/i.test(u)?u:'https://'+u)}catch{return alert('ลิงก์ไม่ถูกต้อง')}
  status('ADDING...');const r=await pen.addUrl(u);status('READY');setNav('lib');await lib();detail(r.game)};
-store(true);
+pen.dataPath().then(p=>$('#sp').textContent=p);
+window.onerror=(m)=>status('JS ERROR: '+m);
+store(true);setTimeout(()=>$('#q').focus(),1300);
 </script></body></html>

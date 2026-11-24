@@ -4,64 +4,28 @@ const { spawn } = require('child_process');
 const AdmZip = require('adm-zip');
 const fs = require('fs');
 
+try { // เก็บเกม/save/ไลบรารีไว้ข้าง PenStore.exe ในโฟลเดอร์ PenStore-Data (ถ้าเขียนได้)
+  const pd = process.env.PORTABLE_EXECUTABLE_DIR;
+  if (pd) { const d = path.join(pd, 'PenStore-Data'); fs.mkdirSync(d, { recursive: true }); fs.accessSync(d, fs.constants.W_OK); app.setPath('userData', d); }
+} catch {}
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36';
 const libFile = () => path.join(app.getPath('userData'), 'library.json');
 const readLib = () => { try { return JSON.parse(fs.readFileSync(libFile(), 'utf8')); } catch { return []; } };
 const writeLib = (l) => fs.writeFileSync(libFile(), JSON.stringify(l, null, 1));
 const decode = (s = '') => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
 
-// ---------- Sources ----------
-// เพิ่มแหล่งเกมใหม่: ทุก source คืน {games:[{id,title,author,desc,thumb,url,genre,source}], url}
-// ใช้หน้าต่างซ่อน (Chromium จริง) อ่านหน้า itch.io ผ่าน DOM แทน regex จะทนกว่าและรูป/ลิงก์ครบ
-let scraper = null, queue = Promise.resolve(), mainWin = null;
-function refocus() { // หน้าต่างซ่อนอาจแย่งโฟกัสคีย์บอร์ดจนพิมพ์ในช่องค้นหาไม่ได้ -> ดึงโฟกัสกลับ
-  if (!mainWin || mainWin.isDestroyed()) return;
-  if (BrowserWindow.getAllWindows().some((w) => w !== mainWin && w.isVisible())) return;
-  mainWin.focus(); mainWin.webContents.focus();
-}
-ipcMain.handle('focus', () => refocus());
-const EXTRACT = `(() => [...document.querySelectorAll('.game_cell')].map(c => {
-  const a = c.querySelector('a.title.game_link, .game_title a, a.game_link'); if (!a) return null;
-  const img = c.querySelector('img'); let thumb = img && (img.dataset.lazy_src || (/^https?:/.test(img.src) ? img.src : ''));
-  if (!thumb) { const t = c.querySelector('.game_thumb'); const m = t && (t.getAttribute('style') || '').match(/url\\(["']?([^"')]+)/); thumb = m ? m[1] : ''; }
-  const id = c.dataset.game_id || a.href;
-  return { id: 'itch-' + id, title: a.textContent.trim(), url: a.href, thumb,
-    desc: (c.querySelector('.game_text') || {}).textContent || '', author: ((c.querySelector('.game_author a')||{}).textContent || ''),
-    genre: ((c.querySelector('.game_genre')||{}).textContent || ''), price: ((c.querySelector('.price_value')||{}).textContent || ''), source: 'itch.io' };
-}).filter(Boolean))()`;
-function scrape(url, script = EXTRACT, sel = '.game_cell') {
-  const job = async () => {
-    if (!scraper || scraper.isDestroyed()) scraper = new BrowserWindow({ show: false, focusable: false, webPreferences: { sandbox: true, partition: 'scraper', images: false } });
-    scraper.webContents.setUserAgent(UA);
-    await scraper.loadURL(url);
-    for (let i = 0; i < 28; i++) {
-      const ok = await scraper.webContents.executeJavaScript(`!!document.querySelector(${JSON.stringify(sel)})`);
-      if (ok) break; await new Promise((r) => setTimeout(r, 250));
-    }
-    const out = await scraper.webContents.executeJavaScript(script);
-    refocus();
-    return out;
-  };
-  const p = queue.then(job, job); queue = p.catch(() => {}); return p;
-}
-const sources = {
-  // ใช้ URL แบบ itch จริง: https://itch.io/games/tag-1v1 และ https://itch.io/search?q=text (ทุกประเภทเกม ไม่จำกัด HTML5)
-  async itch({ q, tag, page = 1, sort = '', filter = '' }) {
-    let url;
-    if (q) url = `https://itch.io/search?q=${encodeURIComponent(q)}&page=${page}`;
-    else {
-      const parts = [sort, filter, tag ? 'tag-' + encodeURIComponent(tag) : ''].filter(Boolean);
-      url = `https://itch.io/games${parts.length ? '/' + parts.join('/') : ''}?page=${page}`;
-    }
-    const games = await scrape(url);
-    return { games, url };
-  }
-};
-
-ipcMain.handle('search', async (_e, o) => {
-  try { const r = await sources[o.source || 'itch'](o); return { ok: true, games: r.games, url: r.url }; }
-  catch (err) { return { ok: false, error: String(err) }; }
+// ---------- Pages ----------
+// main แค่ดึง HTML ด้วย network ของ Chromium แล้วส่งให้หน้าจอ parse เอง (ไม่ใช้หน้าต่างซ่อน จึงไม่แย่งโฟกัสคีย์บอร์ด)
+let mainWin = null;
+ipcMain.handle('page', async (_e, url) => {
+  try {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+    const res = await net.fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US,en;q=0.9' }, signal: ctl.signal });
+    clearTimeout(t);
+    return { ok: true, status: res.status, url: res.url, html: await res.text() };
+  } catch (err) { return { ok: false, error: String(err.message || err) }; }
 });
+ipcMain.handle('open:ext', (_e, u) => shell.openExternal(u));
 
 // ---------- Library ----------
 ipcMain.handle('lib:get', () => readLib());
@@ -87,31 +51,6 @@ ipcMain.handle('save:clear', async (_e, id) => {
   await session.fromPartition('persist:game-' + id).clearStorageData(); return true;
 });
 
-// ---------- Details (รูปตัวอย่าง/คำอธิบาย/ข้อมูลเกม/ไฟล์ดาวน์โหลด) ----------
-const DETAIL = `(() => {
-  const shots = [...document.querySelectorAll('a[data-image_lightbox]')].map(a => a.href);
-  if (!shots.length) { const og = document.querySelector('meta[property="og:image"]'); if (og) shots.push(og.content); }
-  const d = document.querySelector('.formatted_description');
-  let desc = d ? d.innerText.trim().slice(0, 5000) : '';
-  if (!desc) desc = (document.querySelector('meta[property="og:description"]') || {}).content || '';
-  const info = [...document.querySelectorAll('.game_info_panel_widget tr')].map(r => { const t = r.querySelectorAll('td'); return t.length >= 2 ? [t[0].innerText.trim(), t[1].innerText.trim().replace(/\\n+/g, ', ')] : null; }).filter(Boolean);
-  const uploads = [...document.querySelectorAll('.upload')].map(u => {
-    const b = u.querySelector('.download_btn'); if (!b) return null;
-    const pl = []; const has = s => !!u.querySelector('[class*="' + s + '"]');
-    if (has('icon-windows')) pl.push('win'); if (has('icon-apple')) pl.push('mac'); if (has('icon-tux')) pl.push('linux'); if (has('icon-android')) pl.push('android');
-    const n = u.querySelector('.upload_name .name, .upload_name');
-    const s = u.querySelector('.file_size');
-    return { id: b.dataset.upload_id, name: n ? (n.getAttribute('title') || n.textContent).trim() : 'file', size: s ? s.textContent.trim() : '', platforms: pl };
-  }).filter(Boolean);
-  const html5 = !!document.querySelector('.load_iframe_btn, .html_embed_widget, .iframe_placeholder');
-  return { shots, desc, info, uploads, html5 };
-})()`;
-ipcMain.handle('details', async (_e, url) => {
-  try { return { ok: true, ...(await scrape(url, DETAIL, '.game_info_panel_widget, .formatted_description, .upload_list_widget')) }; }
-  catch (err) { return { ok: false, error: String(err) }; }
-});
-ipcMain.handle('open:ext', (_e, u) => shell.openExternal(u));
-
 // ---------- Install / Cache ----------
 const gamesRoot = () => path.join(app.getPath('userData'), 'games');
 const gDir = (id) => path.join(gamesRoot(), id.replace(/[^\w-]/g, '_'));
@@ -119,7 +58,7 @@ const metaOf = (id) => { try { return JSON.parse(fs.readFileSync(path.join(gDir(
 const dirSize = (d) => { let n = 0; try { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); n += e.isDirectory() ? dirSize(p) : fs.statSync(p).size; } } catch {} return n; };
 ipcMain.handle('inst:list', () => {
   const out = {};
-  try { for (const d of fs.readdirSync(gamesRoot())) { const m = metaOf(d); if (m) out[m.game.id] = { size: dirSize(path.join(gamesRoot(), d)), kind: m.kind || 'web' }; } } catch {}
+  try { for (const d of fs.readdirSync(gamesRoot())) { const m = metaOf(d); if (m) out[m.game.id] = { size: dirSize(path.join(gamesRoot(), d)), kind: m.kind || 'web', exes: (m.exes || []).map((x) => path.relative(m.dir, x)), exe: m.exe ? path.relative(m.dir, m.exe) : '' }; } } catch {}
   return out;
 });
 ipcMain.handle('inst:remove', (_e, id) => { fs.rmSync(gDir(id), { recursive: true, force: true }); return true; });
@@ -151,7 +90,8 @@ function hookCache(ses, id, getHost) {
   });
 }
 
-// ---------- Download เกมโหลดไฟล์ (exe/zip) ----------
+// ---------- Download เกมโหลดไฟล์ (เปิดเว็บเบื้องหลัง กดโหลดให้เอง) ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tempRoot = () => path.join(app.getPath('temp'), 'penstore-temp');
 const cleanTemp = () => { try { fs.rmSync(tempRoot(), { recursive: true, force: true }); } catch {} };
 function findExes(root, depth = 0, out = []) {
@@ -159,7 +99,7 @@ function findExes(root, depth = 0, out = []) {
     for (const e of fs.readdirSync(root, { withFileTypes: true })) {
       const p = path.join(root, e.name);
       if (e.isDirectory()) { if (depth < 4) findExes(p, depth + 1, out); }
-      else if (/\.exe$/i.test(e.name) && !/unins|crash|redist|vcredist|dxsetup|dotnet|notification_helper|updater/i.test(e.name)) out.push({ p, size: fs.statSync(p).size });
+      else if (/\.exe$/i.test(e.name) && !/unins|crash|redist|vcredist|dxsetup|dotnet|notification_helper|updater|vc_redist/i.test(e.name)) out.push({ p, size: fs.statSync(p).size });
     }
   } catch {}
   return out.sort((a, b) => b.size - a.size);
@@ -173,52 +113,98 @@ function launch(exe, tempDir) {
     c.unref();
   } catch { shell.openPath(exe); }
 }
+function extractArchive(file, out) {
+  fs.mkdirSync(out, { recursive: true });
+  if (/\.zip$/i.test(file)) { new AdmZip(file).extractAllTo(out, true); return true; }
+  if (/\.(7z|tar|gz|tgz|bz2|xz)$/i.test(file)) {
+    const p7 = require('7zip-bin').path7za.replace('app.asar', 'app.asar.unpacked');
+    const run = (f, o) => require('child_process').spawnSync(p7, ['x', f, '-o' + o, '-y'], { windowsHide: true }).status === 0;
+    if (!run(file, out)) return false;
+    for (const f of fs.readdirSync(out)) if (/\.tar$/i.test(f) && !/\.tar$/i.test(file)) { run(path.join(out, f), out); fs.rmSync(path.join(out, f), { force: true }); }
+    return true;
+  }
+  return false;
+}
 let pending = null, dlHooked = false;
 function hookDl() {
   if (dlHooked) return; dlHooked = true;
   session.fromPartition('scraper').on('will-download', (_ev, item) => {
     const p = pending; if (!p) return item.cancel();
-    const fp = path.join(p.dir, item.getFilename()); item.setSavePath(fp); p.started = true;
+    p.item = item; p.started = true;
+    const fp = path.join(p.dir, item.getFilename()); item.setSavePath(fp);
     item.on('updated', () => p.progress(item.getReceivedBytes(), item.getTotalBytes()));
-    item.once('done', (_e, state) => state === 'completed' ? p.resolve(fp) : p.reject(new Error('download ' + state)));
+    item.once('done', (_e, state) => state === 'completed' ? p.resolve(fp) : p.reject(new Error(state === 'cancelled' ? 'ยกเลิกแล้ว' : 'ดาวน์โหลดล้มเหลว (' + state + ')')));
   });
 }
+function waitLoad(win, ms = 8000) {
+  return new Promise((res) => { let d = false; const f = () => { if (!d) { d = true; res(); } }; win.webContents.once('did-stop-loading', f); setTimeout(f, ms); });
+}
+// เดินตามหน้าเว็บ: หน้าเกม -> (Download Now) -> (No thanks, just take me to the downloads) -> ปุ่มโหลดของไฟล์ที่เลือก
+const STEP = (id) => `(() => {
+  const b = document.querySelector('.download_btn[data-upload_id="${String(id).replace(/\W/g, '')}"]'); if (b) { b.click(); return 'clicked'; }
+  const nt = [...document.querySelectorAll('a,button')].find(e => /no thanks,? just take me to the downloads/i.test(e.textContent)); if (nt) { nt.click(); return 'nothanks'; }
+  const buy = document.querySelector('a.buy_btn, .buy_btn'); if (buy) { buy.click(); return 'buy'; }
+  return 'none'; })()`;
+async function drive(win, g, uploadId, send) {
+  await win.loadURL(g.url);
+  for (let step = 0; step < 8; step++) {
+    let r = 'none';
+    for (let t = 0; t < 10; t++) { try { r = await win.webContents.executeJavaScript(STEP(uploadId)); } catch { r = 'none'; } if (r !== 'none') break; await sleep(500); }
+    if (r === 'clicked') return true;
+    if (r === 'none') return false;
+    send({ phase: 'OPENING DOWNLOAD PAGE...' }); await waitLoad(win);
+  }
+  return false;
+}
+ipcMain.handle('dl:cancel', () => { if (pending) { try { pending.item?.cancel(); } catch {} pending.reject(new Error('ยกเลิกแล้ว')); } return true; });
 ipcMain.handle('dl', async (e, { game: g, uploadId, temp }) => {
+  if (pending) return { ok: false, error: 'กำลังโหลดเกมอื่นอยู่ รอให้เสร็จก่อน' };
   hookDl();
-  const send = (t) => { try { e.sender.send('dl:progress', t); } catch {} };
+  const send = (o) => { try { e.sender.send('dl:progress', { id: g.id, ...o }); } catch {} };
   const dir = temp ? path.join(tempRoot(), g.id.replace(/[^\w-]/g, '_')) : path.join(gDir(g.id), 'app');
   fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
-  let win;
+  let win, to;
   try {
-    send('OPENING GAME PAGE...');
+    send({ phase: 'OPENING GAME PAGE...' });
     const file = await new Promise(async (resolve, reject) => {
-      pending = { dir, resolve, reject, started: false, progress: (r, t) => send(`DOWNLOADING ${(r / 1048576).toFixed(1)}${t > 0 ? ' / ' + (t / 1048576).toFixed(1) : ''} MB`) };
+      pending = { dir, resolve, reject, started: false, item: null, progress: (r, t) => send({ phase: 'DOWNLOADING', received: r, total: t, pct: t > 0 ? Math.round((r / t) * 100) : null }) };
+      to = setTimeout(() => reject(new Error('หมดเวลา (15 นาที)')), 900000);
       win = new BrowserWindow({ show: false, focusable: false, width: 1000, height: 800, title: g.title + ' - กดดาวน์โหลดเองถ้าไม่เริ่ม', webPreferences: { sandbox: true, partition: 'scraper' } });
       win.webContents.setUserAgent(UA);
       win.webContents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { show: false } }));
-      setTimeout(() => reject(new Error('หมดเวลา (10 นาที)')), 600000);
+      const showWin = (txt) => { if (win && !win.isDestroyed()) { win.setFocusable(true); win.show(); send({ phase: 'MANUAL', text: txt }); } };
       try {
-        await win.loadURL(g.url);
-        const ok = await win.webContents.executeJavaScript(`new Promise(res=>{let n=0;const t=setInterval(()=>{const b=document.querySelector('.download_btn[data-upload_id="${String(uploadId).replace(/\W/g, '')}"]');
-          if(b){clearInterval(t);b.click();res(true)}else if(++n>30){clearInterval(t);res(false)}},300)})`);
-        if (!ok) { win.setFocusable(true); win.show(); send('หาปุ่มดาวน์โหลดไม่เจอ: กดดาวน์โหลดเองในหน้าต่างที่เปิดขึ้น (เกมที่ต้องซื้อ/ต้องกด "No thanks")'); }
-        else setTimeout(() => { if (!pending?.started && win && !win.isDestroyed()) { win.setFocusable(true); win.show(); send('ยังไม่เริ่มโหลด: กดดาวน์โหลดเองในหน้าต่างที่เปิดขึ้น'); } }, 20000);
+        const ok = await drive(win, g, uploadId, send);
+        if (!ok) showWin('แอปกดโหลดให้เองไม่ได้ (เกมอาจต้องซื้อ/เป็นหน้าพิเศษ) — กดดาวน์โหลดในหน้าต่างที่เปิดขึ้น แอปจะรับไฟล์ต่อให้');
+        else setTimeout(() => { if (pending && !pending.started) showWin('ยังไม่เริ่มโหลด — กดดาวน์โหลดเองในหน้าต่างที่เปิดขึ้น'); }, 25000);
       } catch (err) { reject(err); }
     });
-    pending = null; if (win && !win.isDestroyed()) win.destroy();
+    clearTimeout(to); pending = null; if (win && !win.isDestroyed()) win.destroy();
     let root = dir;
-    if (/\.zip$/i.test(file)) { send('EXTRACTING...'); root = path.join(dir, 'game'); new AdmZip(file).extractAllTo(root, true); fs.rmSync(file, { force: true }); }
-    const exe = /\.exe$/i.test(file) ? file : findExes(root)[0]?.p;
-    if (!exe) { shell.openPath(root); return { ok: true, manual: true, dir: root }; }
-    if (!temp) fs.writeFileSync(path.join(gDir(g.id), 'game.json'), JSON.stringify({ game: g, kind: 'exe', dir: root, exe }));
-    send('LAUNCHING...'); launch(exe, temp ? dir : null);
-    return { ok: true, exe };
+    if (/\.(zip|7z|tar|gz|tgz|bz2|xz)$/i.test(file)) {
+      send({ phase: 'EXTRACTING', pct: null });
+      root = path.join(dir, 'game');
+      if (!extractArchive(file, root)) { shell.openPath(dir); return { ok: true, manual: true, dir }; }
+      fs.rmSync(file, { force: true });
+    }
+    const exes = /\.exe$/i.test(file) ? [{ p: file }] : findExes(root);
+    if (!exes.length) { shell.openPath(root); return { ok: true, manual: true, dir: root }; }
+    if (temp) { send({ phase: 'LAUNCHING' }); launch(exes[0].p, dir); return { ok: true, launched: true }; }
+    fs.writeFileSync(path.join(gDir(g.id), 'game.json'), JSON.stringify({ game: g, kind: 'exe', dir: root, exe: exes[0].p, exes: exes.slice(0, 15).map((x) => x.p) }));
+    return { ok: true, installed: true };
   } catch (err) {
-    pending = null; if (win && !win.isDestroyed()) win.destroy();
+    clearTimeout(to); pending = null; if (win && !win.isDestroyed()) win.destroy();
     fs.rmSync(dir, { recursive: true, force: true });
     return { ok: false, error: String(err.message || err) };
   }
 });
+ipcMain.handle('exe:set', (_e, { id, rel }) => {
+  const m = metaOf(id); if (!m) return false;
+  const p = path.join(m.dir, rel); if (!p.startsWith(m.dir) || !fs.existsSync(p)) return false;
+  m.exe = p; fs.writeFileSync(path.join(gDir(id), 'game.json'), JSON.stringify(m)); return true;
+});
+ipcMain.handle('folder:open', (_e, id) => { const m = metaOf(id); if (m) shell.openPath(m.dir || gDir(id)); return true; });
+ipcMain.handle('data:path', () => app.getPath('userData'));
 app.on('quit', cleanTemp);
 
 // ---------- Play ----------
@@ -269,7 +255,8 @@ app.whenReady().then(() => {
     backgroundColor: '#171a21', autoHideMenuBar: true, icon: path.join(__dirname, 'renderer/icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true }
   });
-  mainWin = win; win.once('ready-to-show', () => win.focus());
+  mainWin = win;
+  win.webContents.on('before-input-event', (_e, i) => { if (i.type === 'keyDown' && (i.key === 'F12' || (i.control && i.shift && i.key.toLowerCase() === 'i'))) win.webContents.toggleDevTools(); });
   win.loadFile('renderer/index.html');
 });
 app.on('window-all-closed', () => app.quit());
